@@ -21,26 +21,32 @@
 #L:  OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 #L:  WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #L:
+#R: ## HFORMAT
+#R:
+#r: This script is a wrapper around Linux/Unix disk formating tools. Helps
+#r: formating disks with the usual arguments.
+#r:
 #h: Usage: $0 [DEVICES...]
 #h:
 #h: -l            : List removable storage devices.
+#h: -i            : Install file system formating tools.
 #h: -f zero       : Zero the device.
 #h: -f udf|ext3   : Format using UDF.
 #h: -f f2fs       : Format using F2FS file system. (Requires mkfs.f2fs from f2fs-tools)
 #h: -f ntfs|fat32 : Format using NTFS. (Remember to put type 7 with cfdisk)
 #h: -n NAME       : Name for the partition.
 #h: -F            : Run fast formatting. (No zeroing and bad block checks)
-#::
+#r:
 . hutil
-. hapt
 hformat() {
     ## Parse command line arguments.
     local OPTIND optopt= ops= formats="" f= name=
-    while getopts "lf:n:F" optopt;do # OPTARG
+    while getopts "ilf:n:F" optopt;do # OPTARG
         case $optopt in
-            l)  hformat_list_drives;;
-	    F)  HFORMAT_FAST=1;;
-            n)  local name="${OPTARG}";;
+            i)  hformat_install_software ;;
+            l)  hformat_list_drives      ;;
+	    F)  HFORMAT_FAST=1           ;;
+            n)  local name="${OPTARG}"   ;;
             f)  local formats="${formats} ${OPTARG}";;
             \?) return 1;;
         esac
@@ -58,27 +64,44 @@ hformat_calc_variables() {
     HFORMAT_FAST=
 }
 ## --------------------------------------------------------------------------------
+hformat_install_software() {
+    if which "mkudffs" >/dev/null 2>&1;then
+        true
+    elif hutil has debian;then
+        hutil vrun sudo apt-get -y install "udftools"
+    elif hutil has redhat;then
+        hutil vrun sudo yum -y install "udftools"
+    else
+        hutil error "Do not know how to install 'udftools' in this machine."
+    fi
+    if which "mkntfs" >/dev/null 2>&1;then
+        true
+    elif hutil has archlinux;then
+        hutil fatal "The package is extra/ntfs-3g"
+    else
+        hutil error "Do not know how to install 'mkntfs' in this machine."
+    fi
+}
 hformat_list_drives() {
     ls -lh /dev/disk/by-id/ | sed 's|../../|/dev/|g' | sed '\|/dev/nvme|d'
 }
-
 hformat_format_zero() { # DRIVE
     local device="${1}"
     hutil errif "File '$device' does not exist." test ! -e "$device"
     hutil vrun sudo dd if="/dev/zero" of="${device}" bs=1M
+    hutil vrun sync
 }
 hformat_format_udf() { # DRIVE [NAME]
     local device="${1}" name="${2:-`hutil random 8`}"
     hutil errif "File '$device' does not exist." test ! -e "$device"
     hutil errif "You can only format with UDF entire disks." \
           test ! -n "`echo "$1" | grep -e '/dev/sd[abcd]$' -e '/dev/.*[0-9]$'`"
-    hapt -skip "mkudffs" -apt-get "udftools" -yum "udftools"
     hutil vrun sudo dd if="/dev/zero" of='${device}' bs=1M count=1
     hutil vrun sudo mkudffs --utf8                    \
           --media-type=hd --blocksize=512             \
           --lvid="$name" --vid="$name" --fsid="$name" \
           --udfrev=0x0102 "$device"
-    hutil vrun sudo sync
+    hutil vrun sync
 }
 hformat_format_ext3() { # DRIVE [NAME]
     local device="${1}" name="${2:-`hutil random 8`}"
@@ -88,16 +111,16 @@ hformat_format_ext3() { # DRIVE [NAME]
 	  -L "$name"                   \
 	  -M "/mnt/$name"              \
 	  "$device"
+    hutil vrun sync
 }
 hformat_format_ntfs() { # DRIVE [NAME]
     local device="${1}" name="${2:-`hutil random 8`}"
     hutil errif "File '$device' does not exist." test ! -e "$device"
-    hapt -skip "mkntfs" -pacman "extra/ntfs-3g"
     hutil vrun sudo mkntfs                           \
 	  -f                                         \
 	  -L "$name"                                 \
 	  "$device"
-    
+    hutil vrun sync
 }
 hformat_format_fat32() { # DRIVE [NAME]
     local device="${1}" name="${2:-`hutil random 8`}"
@@ -106,13 +129,14 @@ hformat_format_fat32() { # DRIVE [NAME]
     hutil vrun sudo mkfs.fat -F 32                        \
 	  -n "$name"                                      \
 	  "$device"
-    
+    hutil vrun sync
 }
 hformat_format_f2fs() { # DRIVE [NAME]
     local device="${1}" name="${2:-`hutil random 8`}"
     hutil errif "File '$device' does not exist." test ! -e "$device"
     local name="`echo "$name" | tr '[:lower:]' '[:upper:]'`"
     hutil vrun sudo mkfs.f2fs -f -l "${name}" "${device}"
+    hutil vrun sync
 }
 
 
