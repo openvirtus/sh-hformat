@@ -14,6 +14,7 @@ formating disks with the usual arguments.
     -n NAME       : Name for the partition.
     -F            : Run fast formatting. (No zeroing and bad block checks)
 
+
 ## DONATIONS
 <ul>
 <li>
