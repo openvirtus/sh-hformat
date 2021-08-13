@@ -40,7 +40,11 @@
 #h: -n NAME       : Name for the partition.
 #h: -F            : Run fast formatting. (No zeroing and bad block checks)
 #r:
-. hutil
+. hlog
+. hterm
+. hpkg
+. vrun
+. hrand
 hformat() {
     ## Parse command line arguments.
     local OPTIND optopt= ops= formats="" f= name=
@@ -56,10 +60,12 @@ hformat() {
     done
     shift $(( $OPTIND - 1 ))
     for device in "$@";do
-        hutil errif "File '$device' does not exist." test ! -e "$device"
-        if ! hutil stop "All data in $device will be removed.";then return 1;fi
-        for f in $formats;do
-            hformat_format_"$f" "$device" "${name:-`hutil random 8`}"
+        test -e "${device}" || hlog fatal "File '${device}' does not exist."
+        if ! hterm stop "All data in $device will be removed.";then
+            return 1
+        fi
+        for f in ${formats};do
+            hformat_format_"${f}" "${device}" "${name:-`hrand random 8`}"
         done
     done
 }
@@ -68,21 +74,11 @@ hformat_calc_variables() {
 }
 ## --------------------------------------------------------------------------------
 hformat_install_software() {
-    if which "mkudffs" >/dev/null 2>&1;then
-        true
-    elif hutil has debian;then
-        hutil vrun sudo apt-get -y install "udftools"
-    elif hutil has redhat;then
-        hutil vrun sudo yum -y install "udftools"
-    else
-        hutil error "Do not know how to install 'udftools' in this machine."
+    if ! hpkg -w "mkudffs" -i %dpkg "udftools" %rpm "udftools";then
+        hlog error "Do not know how to install 'udftools' in this machine."
     fi
-    if which "mkntfs" >/dev/null 2>&1;then
-        true
-    elif hutil has archlinux;then
-        hutil fatal "The package is extra/ntfs-3g"
-    else
-        hutil error "Do not know how to install 'mkntfs' in this machine."
+    if ! hpkg -w "mkntfs" -i %pacman extra/ntfs-3g;then
+        hlog error "Do not know how to install 'mkntfs' in this machine."
     fi
 }
 hformat_list_drives() {
@@ -90,56 +86,48 @@ hformat_list_drives() {
 }
 hformat_format_zero() { # DRIVE
     local device="${1}"
-    hutil errif "File '$device' does not exist." test ! -e "$device"
-    hutil vrun sudo dd if="/dev/zero" of="${device}" bs=1M
-    hutil vrun sync
+    test -e "$device" || hlog fatal "File '$device' does not exist."
+    vrun sudo dd if="/dev/zero" of="${device}" bs=1M
+    vrun sync
 }
 hformat_format_udf() { # DRIVE [NAME]
-    local device="${1}" name="${2:-`hutil random 8`}"
-    hutil errif "File '$device' does not exist." test ! -e "$device"
-    hutil errif "You can only format with UDF entire disks." \
-          test ! -n "`echo "$1" | grep -e '/dev/sd[abcd]$' -e '/dev/.*[0-9]$'`"
-    hutil vrun sudo dd if="/dev/zero" of='${device}' bs=1M count=1
-    hutil vrun sudo mkudffs --utf8                    \
+    local device="${1}" name="${2:-`hrand random 8`}"
+    test -e "$device" \
+        || hlog fatal "File '$device' does not exist."
+    test -n "`echo "$1" | grep -e '/dev/sd[abcd]$' -e '/dev/.*[0-9]$'`" \
+        || hlog fatal "You can only format with UDF entire disks."
+    vrun sudo dd if="/dev/zero" of='${device}' bs=1M count=1
+    vrun sudo mkudffs --utf8                          \
           --media-type=hd --blocksize=512             \
           --lvid="$name" --vid="$name" --fsid="$name" \
           --udfrev=0x0102 "$device"
-    hutil vrun sync
+    vrun sync
 }
 hformat_format_ext3() { # DRIVE [NAME]
-    local device="${1}" name="${2:-`hutil random 8`}"
-    hutil errif "File '$device' does not exist." test ! -e "$device"
-    hutil vrun sudo mke2fs             \
-	  -t "ext3"                    \
-	  -L "$name"                   \
-	  -M "/mnt/$name"              \
-	  "$device"
-    hutil vrun sync
+    local device="${1}" name="${2:-`hrand random 8`}"
+    test -e "${device}" || hlog fatal "File '${device}' does not exist."
+    vrun sudo mke2fs -t "ext3" -L "${name}" -M "/mnt/${name}" "${device}"
+    vrun sync
 }
 hformat_format_ntfs() { # DRIVE [NAME]
-    local device="${1}" name="${2:-`hutil random 8`}"
-    hutil errif "File '$device' does not exist." test ! -e "$device"
-    hutil vrun sudo mkntfs                           \
-	  -f                                         \
-	  -L "$name"                                 \
-	  "$device"
-    hutil vrun sync
+    local device="${1}" name="${2:-`hrand random 8`}"
+    test -e "${device}" || hlog fatal "File '${device}' does not exist."
+    vrun sudo mkntfs -f -L "${name}" "${device}"
+    vrun sync
 }
 hformat_format_fat32() { # DRIVE [NAME]
-    local device="${1}" name="${2:-`hutil random 8`}"
-    hutil errif "File '$device' does not exist." test ! -e "$device"
-    local name="`echo "$name" | tr '[:lower:]' '[:upper:]'`"
-    hutil vrun sudo mkfs.fat -F 32                        \
-	  -n "$name"                                      \
-	  "$device"
-    hutil vrun sync
+    local device="${1}" name="${2:-`hrand random 8`}"
+    test -e "${device}" || hlog fatal "File '${device}' does not exist."
+    local name="`echo "${name}" | tr '[:lower:]' '[:upper:]'`"
+    vrun sudo mkfs.fat -F 32 -n "${name}" "${device}"
+    vrun sync
 }
 hformat_format_f2fs() { # DRIVE [NAME]
-    local device="${1}" name="${2:-`hutil random 8`}"
-    hutil errif "File '$device' does not exist." test ! -e "$device"
-    local name="`echo "$name" | tr '[:lower:]' '[:upper:]'`"
-    hutil vrun sudo mkfs.f2fs -f -l "${name}" "${device}"
-    hutil vrun sync
+    local device="${1}" name="${2:-`hrand random 8`}"
+    test -e "${device}" || hlog fatal "File '${device}' does not exist."
+    local name="`echo "${name}" | tr '[:lower:]' '[:upper:]'`"
+    vrun sudo mkfs.f2fs -f -l "${name}" "${device}"
+    vrun sync
 }
 
 
@@ -151,7 +139,9 @@ if test @"`basename "$0"`" = @"hformat";then
     if test -n "$1";then
         hformat "$@"
     else
-        hutil help
+        sed -n 's/^ *#h: \{0,1\}//p' "$0" | sed "s|\\\$0|`basename $0`|g"
+        echo ""
+        sed -n 's/^ *#l: \{0,2\}//p' "$0"
     fi
 fi
 
